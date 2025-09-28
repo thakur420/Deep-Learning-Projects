@@ -665,11 +665,22 @@ def update_parameters_with_adam(parameters, grads, v, s, t, learning_rate=0.001,
 """<a name='8'></a>
 ## 8 - Deep Neural Network
 
+## Neural Network Helper Function
+
 <a name='8-1'></a>
 ## 8.1 - Basic Neural Network
 """
 
-def NN_from_scratch(X, Y, layers, learning_rate, iter=1000, activations='tanh', optimizer='GD'):
+def configure_network(layers, input_size, output_size):
+  layers.insert(0, input_size)
+  layers.append(output_size)
+  return layers
+
+def NN_from_scratch(X, Y, layers,
+                    learning_rate, iter=1000,
+                    activations='tanh', optimizer='GD',
+                    network_type='basic',
+                    lamd=0.01, keep_prob=0.8):
   """
   Trains a simple neural network from scratch.
 
@@ -679,17 +690,20 @@ def NN_from_scratch(X, Y, layers, learning_rate, iter=1000, activations='tanh', 
   layers -- a list containing the number of nodes in each hidden layer (excluding input and output)
   learning_rate -- the learning rate for gradient descent
   iter -- number of iterations for training
+  optimizer -- one of 'GD', 'momentum', or 'adam'
+  network_type -- one of 'basic', 'L2', or 'dropout'
+  lamd -- the regularization hyperparameter
+  keep_prob -- dropout probability (percentage of neurons to keep)
 
   Returns:
   parameters -- the learned parameters after training
   costs -- a list containing the cost at each iteration
   """
-  # Insert input layer size at the beginning of the layers list
-  layers.insert(0, X.shape[0])
-  layers.push(Y.shape[0])
+  # Add Input and Output Size in the network
+  layers = configure_network(layers, X.shape[0], Y.shape[0])
+
   # Initialize parameters for the neural network
   parameters = initialize_parameters(layers, activations)
-  # debug_weight_explosion(parameters)
 
   if optimizer == 'momentum':
     v = initialize_velocity(parameters)
@@ -701,13 +715,29 @@ def NN_from_scratch(X, Y, layers, learning_rate, iter=1000, activations='tanh', 
 
   # Training loop
   for i in range(iter + 1):
-    A, cache = forward_propagation(parameters, X, activations)
+    # 1. Forward Propagation
+    if network_type = 'dropout':
+      A, cache = forward_propagation_with_dropout(parameters, X, keep_prob, activations)
+    else:
+      A, cache = forward_propagation(parameters, X, activations)
 
-    cost = compute_cost(A, Y)
+    # 2. Compute Cost
+    if network_type == 'L2':
+      cost = compute_cost_with_regularization(A, Y, parameters, lambd)
+    else:
+      cost = compute_cost(A, Y, keep_prob)
+
     costs.append(cost)
 
-    grads = backward_propagate(parameters, cache, X, Y, activations)
-    # Update parameters using gradient descent
+    # 3. Backward propagation to compute gradients
+    if network_type == 'dropout':
+      grads = backward_propagate_with_dropout(parameters, cache, X, Y, keep_prob, activations)
+    elif network_type == 'L2':
+      grads = backward_propagate_with_regularization(parameters, cache, X, Y, lambd, activations)
+    else:
+      grads = backward_propagate(parameters, cache, X, Y, activations)
+
+    # 4. Update parameters using gradient descent
     if optimizer == 'GD':
       parameters = update_parameters(parameters, grads, learning_rate)
     elif optimizer == 'momentum':
@@ -715,7 +745,7 @@ def NN_from_scratch(X, Y, layers, learning_rate, iter=1000, activations='tanh', 
     else:
       parameters, v, s = update_parameters_with_adam(parameters, grads, v, s, t=i, learning_rate=learning_rate)
 
-    # Optional: Print cost every a few iterations to see the learning progress
+    # 5. Optional: Print cost every a few iterations to see the learning progress
     step = iter // 25
     if i % step == 0:
         print(f"Cost after iteration {i}: {cost}")
@@ -744,7 +774,7 @@ def NN_from_scratch_with_regularization(X, Y, layers, learning_rate, lambd = 0.1
   """
   # Insert input layer size at the beginning of the layers list
   layers.insert(0, X.shape[0])
-  layers.push(Y.shape[0])
+  layers.append(Y.shape[0])
   # Initialize parameters for the neural network
   parameters = initialize_parameters(layers)
   if optimizer == 'momentum':
@@ -759,13 +789,11 @@ def NN_from_scratch_with_regularization(X, Y, layers, learning_rate, lambd = 0.1
   for i in range(iter + 1):
     # Forward propagation
     A, cache = forward_propagation(parameters, X, activations)
-    # print(f"A: {A}")
     # Compute cost with regularization
     cost = compute_cost_with_regularization(A, Y, parameters, lambd)
 
     if np.isnan(cost):
         print(f"Cost became NaN at iteration {i}. Stopping training.")
-        # print(f"Parameters: {parameters}")
         print(f"A: {A}")
         print(f"Y: {Y}")
         break # Exit the training loop
@@ -813,7 +841,7 @@ def NN_from_scratch_with_dropout(X, Y, layers, learning_rate, keep_prob, iter=10
   """
   # Insert input layer size at the beginning of the layers list
   layers.insert(0, X.shape[0])
-  layers.push(Y.shape[0])
+  layers.append(Y.shape[0])
   # Initialize parameters for the neural network
   parameters = initialize_parameters(layers)
   if optimizer == 'momentum':
@@ -918,9 +946,8 @@ predictions_test = (A_test > 0.5).astype(int)
 
 # Evaluate the network's performance
 # Convert CuPy arrays to NumPy arrays before passing to accuracy_score
-# accuracy_score_safe = numpy_safe(accuracy_score) # handle both numpy and cupy input
 accuracy_train = accuracy_score_safe(Y_train.T, predictions_train.T) # Transpose back for accuracy_score
-accuracy_test = accuracy_score_safe(Y_test.T.get(), predictions_test.T.get()) # Transpose back for accuracy_score
+accuracy_test = accuracy_score_safe(Y_test.T, predictions_test.T) # Transpose back for accuracy_score
 
 plt.plot(costs)
 plt.ylabel('cost')
@@ -1130,7 +1157,7 @@ plt.show()
 X_train_flat = x_train_binary.reshape(x_train_binary.shape[0], -1).T
 X_test_flat = x_test_binary.reshape(x_test_binary.shape[0], -1).T
 
-# print(X_train_flat[0:])
+
 # Normalize the pixel values to be between 0 and 1
 X_train_flat = X_train_flat / 255.0
 X_test_flat = X_test_flat / 255.0
@@ -1192,7 +1219,6 @@ A_test, _ = forward_propagation(parameters_cifar, X_test_flat)
 predictions_test = (A_test > 0.5).astype(int)
 
 # Evaluate the network's performance
-# accuracy_score_safe = numpy_safe(accuracy_score)
 accuracy_train = accuracy_score_safe(Y_train_reduced.T, predictions_train.T) # Transpose back for accuracy_score
 accuracy_test = accuracy_score_safe(Y_test_reshaped.T, predictions_test.T) # Transpose back for accuracy_score
 
@@ -1232,7 +1258,6 @@ A_test, _ = forward_propagation(parameters_cifar, X_test_flat)
 predictions_test = (A_test > 0.5).astype(int)
 
 # Evaluate the network's performance
-# accuracy_score_safe = numpy_safe(accuracy_score)
 accuracy_train = accuracy_score_safe(Y_train_reduced.T, predictions_train.T) # Transpose back for accuracy_score
 accuracy_test = accuracy_score_safe(Y_test_reshaped.T, predictions_test.T) # Transpose back for accuracy_score
 
@@ -1244,9 +1269,6 @@ plt.title("Learning rate =" + str(learning_rate_cifar))
 plt.show()
 print(f"\nAccuracy on the train set (CIFAR-10 binary): {accuracy_train:.4f}")
 print(f"\nAccuracy on the test set (CIFAR-10 binary): {accuracy_test:.4f}")
-
-# Assuming Y_test_reshaped and predictions_test are available from previous cells
-# and are in the correct format (e.g., 1D arrays or flattened).
 
 # Flatten the arrays if they are not already 1D
 y_true = Y_test_reshaped.flatten()
@@ -1472,7 +1494,6 @@ A_test, _ = forward_propagation(parameters_cifar, X_test_flat)
 predictions_test = (A_test > 0.5).astype(int)
 
 # Evaluate the network's performance
-# accuracy_score_safe = numpy_safe(accuracy_score)
 accuracy_train = accuracy_score_safe(Y_train_reduced.T, predictions_train.T) # Transpose back for accuracy_score
 accuracy_test = accuracy_score_safe(Y_test_reshaped.T, predictions_test.T) # Transpose back for accuracy_score
 
