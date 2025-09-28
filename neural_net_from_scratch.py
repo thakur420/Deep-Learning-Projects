@@ -680,7 +680,7 @@ def NN_from_scratch(X, Y, layers,
                     learning_rate, iter=1000,
                     activations='tanh', optimizer='GD',
                     network_type='basic',
-                    lamd=0.01, keep_prob=0.8):
+                    lambd=0.01, keep_prob=0.8):
   """
   Trains a simple neural network from scratch.
 
@@ -692,7 +692,7 @@ def NN_from_scratch(X, Y, layers,
   iter -- number of iterations for training
   optimizer -- one of 'GD', 'momentum', or 'adam'
   network_type -- one of 'basic', 'L2', or 'dropout'
-  lamd -- the regularization hyperparameter
+  lambd -- the regularization hyperparameter
   keep_prob -- dropout probability (percentage of neurons to keep)
 
   Returns:
@@ -716,7 +716,7 @@ def NN_from_scratch(X, Y, layers,
   # Training loop
   for i in range(iter + 1):
     # 1. Forward Propagation
-    if network_type = 'dropout':
+    if network_type == 'dropout':
       A, cache = forward_propagation_with_dropout(parameters, X, keep_prob, activations)
     else:
       A, cache = forward_propagation(parameters, X, activations)
@@ -725,7 +725,7 @@ def NN_from_scratch(X, Y, layers,
     if network_type == 'L2':
       cost = compute_cost_with_regularization(A, Y, parameters, lambd)
     else:
-      cost = compute_cost(A, Y, keep_prob)
+      cost = compute_cost(A, Y)
 
     costs.append(cost)
 
