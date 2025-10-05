@@ -6,7 +6,7 @@ This repository contains deep learning projects implemented from scratch using P
 
 In the notebook, `Neural_Net_from_Scratch.ipynb`, we implement a fully connected neural network **from scratch** without using any deep learning frameworks like TensorFlow or PyTorch.
 
-In the notebook, `Neural_Net_from_Framework.ipynb`, we implement a fully connected neural net **(MLP, CNN)** using TensorFlow Keras framework.
+In the notebook, `Neural_Net_Using_FrameWork.ipynb`, we implement a fully connected neural net **(MLP, CNN)** using TensorFlow Keras framework.
 
 ### Features
 
