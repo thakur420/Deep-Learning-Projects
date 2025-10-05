@@ -46,5 +46,5 @@ Make sure you have the following installed:
 
 Clone this repository:
 ```bash
-git clone https://github.com/<your-username>/deep-learning-projects.git
+git clone https://github.com/thakur420/Deep-Learning-Projects.git
 cd deep-learning-projects
