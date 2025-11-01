@@ -32,6 +32,21 @@ This project demonstrates how deep learning models can be built both:
 
 ---
 
+## 🧠 Model Performance Summary
+
+Here's a summary of the performance on the test set for each model:
+
+| 🧩 **Model** | ⚙️ **Train Accuracy** | 🧪 **Test Accuracy** | 📊 **Remarks** |
+|:-------------|:--------------------:|:--------------------:|:----------------|
+| MLP Model | 98% | 61% | ⚠️ Overfitting |
+| Basic CNN Model | 93% | 73% | ✅ Stable baseline |
+| CNN with BN and Dropout (LeNet-5 style) | 80% | 75% | 👍 Better generalization |
+| CNN with Data Augmentation (LeNet-5 style) | 80% | 76% | 📈 Slight improvement |
+| Larger CNN with Data Augmentation | 99% | 83% | ⚠️ Overfitting sign |
+| **Transfer Learning with EfficientNetB0** | **92%** | **91% 🏆** | 🌟 Best performance |
+---
+> 🏁 **Conclusion:** The EfficientNetB0 model achieved the highest test accuracy, showing the benefit of transfer learning.
+
 ## ⚙️ Getting Started
 
 ### 🧩 Prerequisites
