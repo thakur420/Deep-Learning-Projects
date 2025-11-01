@@ -8,7 +8,7 @@ Original file is located at
 
 # Neural Network(MLP,CNN) Implementation using Keras
 
-* This notebook is extension of [Neural Net from Scratch](https://colab.research.google.com/drive/1Dn1QJ2sIGOEZ4O6Fy5xAtZsRngtgmn9e)
+* This notebook is the extension of [Neural Net from Scratch](https://colab.research.google.com/drive/1Dn1QJ2sIGOEZ4O6Fy5xAtZsRngtgmn9e)
  * This notebook will implement Neural Net(**MLP,CNN**) using tensorflow keras framework
 
 ## Packages
@@ -23,11 +23,12 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from keras.models import Model
 from keras.applications import MobileNetV2
-from keras import layers,datasets,optimizers
+from keras import layers,datasets,optimizers,regularizers,models
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.initializers import random_uniform, glorot_uniform, constant, identity
 
 physical_devices = tf.config.list_physical_devices()
 
@@ -89,11 +90,16 @@ ReduceLR = keras.callbacks.ReduceLROnPlateau(
 """### DataAugmentor"""
 
 datagen = ImageDataGenerator(
-    rotation_range=10,       # randomly rotate images by up to 10 degrees
-    width_shift_range=0.1,   # randomly shift images horizontally by 10% of width
-    height_shift_range=0.1,  # randomly shift images vertically by 10% of height
-    horizontal_flip=True,    # randomly flip images horizontally
-    zoom_range=0.1           # random zoom
+    rotation_range=10,              # randomly rotate images by up to 10 degrees
+    width_shift_range=0.1,          # randomly shift images horizontally by 10% of width
+    height_shift_range=0.1,         # randomly shift images vertically by 10% of height
+    horizontal_flip=True,           # randomly flip images horizontally
+    zoom_range=0.1,                 # random zoom
+    brightness_range=[0.8, 1.2],    # random brightness adjustment
+    channel_shift_range=20.0,       # random RGB channel shifts
+    shear_range=0.1,                # shear transformation
+    fill_mode='nearest',
+    rescale=1./255
 )
 
 """## Data Loading and Preprocessing
@@ -126,8 +132,8 @@ y_train = np.where(y_train == class_1_label, 0, 1)
 y_test = np.where(y_test == class_1_label, 0, 1)
 
 # Normalize the pixel values to be between 0 and 1
-x_train = x_train / 255.0
-x_test = x_test / 255.0
+# x_train = x_train / 255.0
+# x_test = x_test / 255.0
 
 # Suppose x_test and y_test are tf.Tensors
 x_test_np = x_test.numpy() if tf.is_tensor(x_test) else x_test
@@ -146,8 +152,33 @@ print(f"\nBinary train shapes (cat vs dog): x={x_train.shape}, y={y_train.shape}
 print(f"Binary validation shapes (cat vs dog): x={x_val.shape}, y={y_val.shape}")
 print(f"Binary test shapes (cat vs dog): x={x_test.shape}, y={y_test.shape}")
 
+# Pick one sample image from training data
+img = x_train[0]  # You can change the index to view another image
+img_array = img.reshape((1,) + img.shape)
+
+# Plot original image
+plt.figure(figsize=(5, 5))
+plt.subplot(3, 3, 1)
+plt.imshow(img.astype("uint8"))
+plt.title("Original")
+plt.axis("off")
+
+# Generate and plot augmentations
+i = 0
+for batch in datagen.flow(img_array, batch_size=1):
+    plt.subplot(3, 3, i + 2)
+    plt.imshow(tf.cast(batch[0] / 255.0, tf.float32))
+    plt.title(f"Aug {i+1}")
+    plt.axis("off")
+    i += 1
+    if i == 8:  # show 8 augmentations
+        break
+
+plt.tight_layout()
+plt.show()
+
 # Optional: Display a few images from the binary dataset
-plt.figure(figsize=(10, 10))
+plt.figure(figsize=(8,8))
 for k in range(5):
     plt.subplot(1, 5, k + 1)
     i = random.randrange(len(x_train))
@@ -644,91 +675,150 @@ for i in range(num_images_to_plot):
 plt.tight_layout()
 plt.show()
 
-"""### Transfer learning with MolieNetV2
+"""### Transfer Learning With EfficientNetB0"""
 
-#### Network Architecture
-"""
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications.efficientnet import preprocess_input
 
-def transfer_learning_based_classifier(img_size=(32,32,3)):
-  # Load pre-trained MobileNetV2
-  base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=img_size)
-  #base_model.trainable = False  # freeze base layers initially
-  print(f"Number of layers in the mobilenet V2: {len(base_model.layers)}")
-  # 2. Unfreeze last 20 layers & fine-tune
-  #base_model.trainable = False
-  for layer in base_model.layers[:-50]:
-    layer.trainable = False
 
-  # Add custom classification head
-  x = base_model.output
-  x = layers.GlobalAveragePooling2D()(x)
-  x = layers.Dense(128, activation='relu')(x)
-  # x = layers.Dropout(0.2)(x)
-  output = layers.Dense(1, activation='sigmoid')(x)  # binary classification
-
-  return Model(inputs=base_model.input, outputs=output)
-
-"""#### Model Training"""
-
-# -------------------------
-# tf.data pipeline
-# -------------------------
+# -----------------------------
+# 1. Parameters
+# -----------------------------
 IMG_SIZE = 96
 BATCH_SIZE = 32
+EPOCHS_PHASE1 = 30  # training classifier head
+EPOCHS_PHASE2 = 20  # fine-tuning top layers
+DENSE_UNITS = 128
 
-def preprocess(image, label):
-    image = tf.image.resize(image, (IMG_SIZE, IMG_SIZE))
-    # image = tf.cast(image, tf.float32) / 255.0
-    image = preprocess_input(image)
-    return image, label
+# -----------------------------
+# 2. Resize images from 32x32 to 96x96
+# -----------------------------
+x_train_resized = tf.image.resize(x_train, (IMG_SIZE, IMG_SIZE)).numpy()
+x_val_resized  = tf.image.resize(x_val, (IMG_SIZE, IMG_SIZE)).numpy()
+x_test_resized  = tf.image.resize(x_test, (IMG_SIZE, IMG_SIZE)).numpy()
 
-def augment(image, label):
-    image = tf.image.random_flip_left_right(image)
-    image = tf.image.random_flip_up_down(image)
-    image = tf.image.random_brightness(image, max_delta=0.1)
-    image = tf.image.random_contrast(image, 0.8, 1.2)
-    return image, label
+# -----------------------------
+# 3. Data Augmentation for Training
+# -----------------------------
+train_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,  # normalize to [-1,1]
+    rotation_range=10,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True,
+    zoom_range=0.1,
+    brightness_range=[0.8, 1.2],
+    shear_range=0.1,
+    fill_mode='nearest',
+)
 
-# Training dataset
-train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
-train_ds = train_ds.shuffle(1000).map(preprocess, num_parallel_calls=tf.data.AUTOTUNE).map(augment)
-train_ds = train_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+val_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input  # only normalization
+)
 
-# Validation dataset
-val_ds = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-val_ds = val_ds.map(preprocess).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+# Generators
+train_gen = train_datagen.flow(
+    x_train_resized, y_train,
+    batch_size=BATCH_SIZE, subset='training'
+)
 
-# Test dataset
-test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
-test_ds = test_ds.map(preprocess).batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+val_gen = val_datagen.flow(
+    x_val_resized, y_val,
+    batch_size=BATCH_SIZE,
+    shuffle=False  # keep order fixed
+)
 
-input_shape = (IMG_SIZE, IMG_SIZE, 3)
-transfer_learning_based_model = transfer_learning_based_classifier(input_shape)
-transfer_learning_based_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-transfer_learning_based_model.summary()
+# Test generator
+test_gen = val_datagen.flow(
+    x_test_resized, y_test,
+    batch_size=BATCH_SIZE,
+    shuffle=False
+)
 
-epochs, batch_size = 500, BATCH_SIZE
-total_print = 20
-history = transfer_learning_based_model.fit(
-                              # datagen.flow(x_train, y_train, batch_size=batch_size),
-                               train_ds,
-                               batch_size=batch_size,
-                               epochs=epochs,
-                               validation_data=val_ds,
-                               callbacks=[CustomProgbarLogger(print_every=epochs//total_print),
-                                          EarlyStopping,
-                                          # ReduceLR
-                                          ],
-                               verbose=0)
+# -----------------------------
+# 4. Load Pretrained EfficientNetB0
+# -----------------------------
+base_model = EfficientNetB0(
+    include_top=False,
+    weights='imagenet',
+    input_shape=(IMG_SIZE, IMG_SIZE, 3)
+)
+base_model.trainable = False  # freeze base initially
+
+# Add classification head
+inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x = base_model(inputs, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.Dense(DENSE_UNITS, kernel_regularizer=regularizers.l2(1e-4))(x)
+x = layers.BatchNormalization()(x)
+x = layers.Activation('relu')(x)
+x = layers.Dropout(0.5)(x)
+outputs = layers.Dense(1, activation='sigmoid')(x)  # binary classification
+
+model = models.Model(inputs, outputs)
+
+# Compile model
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=1e-3),
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+
+# -----------------------------
+# 5. Callbacks
+# -----------------------------
+callbacks = [
+    keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1),
+    keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+]
+
+# -----------------------------
+# 6. Phase 1: Train classifier head
+# -----------------------------
+history_phase1 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=EPOCHS_PHASE1,
+    callbacks=callbacks
+)
+
+# -----------------------------
+# 7. Phase 2: Fine-tuning top layers
+# -----------------------------
+base_model.trainable = True
+for layer in base_model.layers[:-20]:  # freeze bottom layers, fine-tune top 20
+    layer.trainable = False
+
+# Compile with lower LR for fine-tuning
+model.compile(
+    optimizer=optimizers.Adam(learning_rate=1e-4),
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
+
+history_phase2 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=EPOCHS_PHASE2,
+    callbacks=callbacks
+)
+
+# -----------------------------
+# 8. Evaluate on Test Data
+# -----------------------------
+test_loss, test_acc = model.evaluate(test_gen)
+print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_acc:.4f}")
 
 """#### Model Evaluation"""
 
-#transfer_learning_based_model.save('mobilenetV2_finetuned_weight.keras')
-transfer_learning_based_model.evaluate(test_ds)
+model.save('efficientnet_with_tl_weight.keras')
+model.evaluate(test_gen)
 
 # The history.history["loss"] entry is a dictionary with as many values as epochs that the
 # model was trained on.
-df_loss_acc = pd.DataFrame(history.history)
+df_loss_acc = pd.DataFrame(history_phase2.history)
 df_loss= df_loss_acc[['loss','val_loss']]
 df_loss.rename(columns={'loss':'train','val_loss':'validation'})
 df_acc= df_loss_acc[['accuracy','val_accuracy']]
@@ -736,7 +826,7 @@ df_acc.rename(columns={'accuracy':'train','val_accuracy':'validation'})
 df_loss.plot(title='Model loss',figsize=(12,5)).set(xlabel='Epoch',ylabel='Loss')
 df_acc.plot(title='Model Accuracy',figsize=(12,5)).set(xlabel='Epoch',ylabel='Accuracy')
 
-y_pred = transfer_learning_based_model.predict(test_ds)
+y_pred = model.predict(test_gen)
 y_pred_classes = (y_pred > 0.5).astype(int)
 conf_matrix = confusion_matrix(y_test, y_pred_classes)
 
@@ -751,6 +841,212 @@ plt.ylabel('True Label')
 plt.title('Confusion Matrix')
 plt.show()
 
+# Find the indices where the true labels do not match the predicted labels
+misclassified_indices = np.where(y_pred_class != y_test)[0]
+
+# Print the number of misclassified images
+print(f"Number of misclassified images: {len(misclassified_indices)}")
+
+# Filter for high-confidence errors: probability <0.1 or >0.9
+misclassified_indices = [i for i in misclassified_indices if y_pred_prob[i] < 0.05 or y_pred_prob[i] > 0.95]
+
+
+# Plot a few of the misclassified images
+plt.figure(figsize=(6, 6))
+
+
+num_images_to_plot = min(20, len(misclassified_indices)) # Plot up to 20 misclassified images
+
+for i in range(num_images_to_plot):
+    index = misclassified_indices[i]
+    plt.subplot(4, 5, i + 1) # Adjust subplot grid based on the number of images
+    # Display the original image from the test set
+    plt.imshow(x_test[index])
+    # Display the true and predicted labels
+    true_label = class_names[class_1_label] if y_test[index] == 0 else class_names[class_2_label]
+    predicted_label = class_names[class_1_label] if y_pred_class[index] == 0 else class_names[class_2_label]
+    plt.title(f"True: {true_label}\nPred: {predicted_label}")
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+"""## Transfer learning with larger image size(from 96x96 to 128 x128)"""
+
+import tensorflow as tf
+from tensorflow.keras import layers, models, regularizers
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications.efficientnet import preprocess_input
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+
+# ===============================================
+# 🧠 1. Configuration
+# ===============================================
+IMG_SIZE = 128            # Increase from 32 -> 128 for richer detail
+BATCH_SIZE = 64
+EPOCHS = 75
+LR_FINE_TUNE = 1e-5
+WEIGHT_DECAY = 1e-5
+
+# ===============================================
+# 🧩 2. Data preprocessing and augmentation
+# ===============================================
+train_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,  # Normalize to [-1, 1]
+    rotation_range=15,
+    width_shift_range=0.15,
+    height_shift_range=0.15,
+    horizontal_flip=True,
+    zoom_range=0.2,
+    brightness_range=[0.7, 1.3],
+    shear_range=0.1
+)
+
+val_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+
+# Resize CIFAR-10 images
+x_train_resized = tf.image.resize(x_train, (IMG_SIZE, IMG_SIZE))
+x_val_resized = tf.image.resize(x_val, (IMG_SIZE, IMG_SIZE))
+x_test_resized = tf.image.resize(x_test, (IMG_SIZE, IMG_SIZE))
+
+train_gen = train_datagen.flow(x_train_resized, y_train, batch_size=BATCH_SIZE, shuffle=True)
+val_gen = val_datagen.flow(x_val_resized, y_val, batch_size=BATCH_SIZE, shuffle=False)
+
+# ===============================================
+# 🏗️ 3. Build model — EfficientNetB0 backbone
+# ===============================================
+base_model = EfficientNetB0(
+    include_top=False,
+    weights='imagenet',
+    input_shape=(IMG_SIZE, IMG_SIZE, 3)
+)
+base_model.trainable = False  # Phase 1 — freeze backbone
+
+inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x = base_model(inputs, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.Dropout(0.4)(x)
+x = layers.Dense(128, activation='relu', kernel_regularizer=regularizers.l2(1e-4))(x)
+x = layers.Dropout(0.3)(x)
+outputs = layers.Dense(1, activation='sigmoid')(x)
+
+model = models.Model(inputs, outputs)
+
+# ===============================================
+# ⚙️ 4. Phase 1 — Train classifier head
+# ===============================================
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+    loss=tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1),
+    metrics=['accuracy']
+)
+
+callbacks = [
+    EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+    ModelCheckpoint('efficientnetb0_phase1.h5', save_best_only=True)
+]
+
+history_phase1 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=EPOCHS,
+    callbacks=callbacks
+)
+
+# ===============================================
+# 🔧 5. Phase 2 — Fine-tune top layers
+# ===============================================
+# Unfreeze deeper portion of the model
+for layer in base_model.layers[-60:]:
+    layer.trainable = True
+
+model.compile(
+    optimizer=tf.keras.optimizers.AdamW(learning_rate=LR_FINE_TUNE, weight_decay=WEIGHT_DECAY),
+    loss=tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1),
+    metrics=['accuracy']
+)
+
+callbacks_ft = [
+    EarlyStopping(monitor='val_loss', patience=6, restore_best_weights=True),
+    ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3),
+    ModelCheckpoint('efficientnetb0_finetuned.h5', save_best_only=True)
+]
+
+history_phase2 = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=EPOCHS,
+    callbacks=callbacks_ft
+)
+
+# ===============================================
+# 🧪 6. Evaluate
+# ===============================================
+test_gen = val_datagen.flow(x_test_resized, y_test, batch_size=BATCH_SIZE, shuffle=False)
+test_loss, test_acc = model.evaluate(test_gen)
+print(f"✅ Test accuracy: {test_acc:.4f} | Test loss: {test_loss:.4f}")
+
+"""#### Model Evaluation"""
+
+model.save('efficientnet_with_larger_image_tl_weight.keras')
+model.evaluate(test_gen)
+
+# The history.history["loss"] entry is a dictionary with as many values as epochs that the
+# model was trained on.
+df_loss_acc = pd.DataFrame(history_phase2.history)
+df_loss= df_loss_acc[['loss','val_loss']]
+df_loss.rename(columns={'loss':'train','val_loss':'validation'})
+df_acc= df_loss_acc[['accuracy','val_accuracy']]
+df_acc.rename(columns={'accuracy':'train','val_accuracy':'validation'})
+df_loss.plot(title='Model loss',figsize=(12,5)).set(xlabel='Epoch',ylabel='Loss')
+df_acc.plot(title='Model Accuracy',figsize=(12,5)).set(xlabel='Epoch',ylabel='Accuracy')
+
+y_pred = model.predict(test_gen)
+y_pred_classes = (y_pred > 0.5).astype(int)
+conf_matrix = confusion_matrix(y_test, y_pred_classes)
+
+# Define the class names for the binary classification
+binary_class_names = [class_names[class_1_label], class_names[class_2_label]]
+
+# Create a heatmap
+plt.figure(figsize=(6, 4))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=binary_class_names, yticklabels=binary_class_names)
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.title('Confusion Matrix')
+plt.show()
+
+# Find the indices where the true labels do not match the predicted labels
+misclassified_indices = np.where(y_pred_classes != y_test)[0]
+
+# Print the number of misclassified images
+print(f"Number of misclassified images: {len(misclassified_indices)}")
+
+# Filter for high-confidence errors: probability <0.1 or >0.9
+misclassified_indices = [i for i in misclassified_indices if y_pred[i] < 0.05 or y_pred[i] > 0.95]
+
+
+# Plot a few of the misclassified images
+plt.figure(figsize=(10, 10))
+
+
+num_images_to_plot = min(20, len(misclassified_indices)) # Plot up to 20 misclassified images
+
+for i in range(num_images_to_plot):
+    index = misclassified_indices[i]
+    plt.subplot(4, 5, i + 1) # Adjust subplot grid based on the number of images
+    # Display the original image from the test set
+    plt.imshow(x_test[index])
+    # Display the true and predicted labels
+    true_label = class_names[class_1_label] if y_test[index] == 0 else class_names[class_2_label]
+    predicted_label = class_names[class_1_label] if y_pred_classes[index] == 0 else class_names[class_2_label]
+    plt.title(f"True: {true_label}\nPred: {predicted_label}")
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
 """## Conclusion
 
 In this notebook, we implemented and compared several neural network models (MLP and CNN variations) for binary image classification on a subset of the CIFAR-10 dataset (distinguishing between 'cat' and 'dog' images).
@@ -761,6 +1057,7 @@ The models trained were:
 - CNN with Batch Normalization and Dropout (LeNet-5 style)
 - CNN with Data Augmentation (LeNet-5 style)
 - Larger CNN with Data Augmentation
+- Transfer Learning with EfficientNetB0
 
 Here's a summary of the performance on the test set for each model:
 
@@ -770,11 +1067,13 @@ Here's a summary of the performance on the test set for each model:
 | Basic CNN Model                           | 93%          | 73%         |
 | CNN with BN and Dropout (LeNet-5 style)   | 80%          | 75%         |
 | CNN with Data Augmentation (LeNet-5 style)| 80%          | 76%         |
-| Larger CNN with Data Augmentation         | 99%          | 83%         |
+| Larger CNN with Data Augmentation         | 99%(sign of overfitiing)          | 83%         |
+| Transfer Learning with EfficientNetB0     | 92%           | 91%         |
 
-Based on the evaluation on the test set, the **Larger CNN with Data Augmentation** model achieved the highest accuracy of **83**% in distinguishing between 'cat' and 'dog' images.
+
+Based on the evaluation on the test set, the **Transfer Learning with EfficientNetB0** model achieved the highest accuracy of **91**% in distinguishing between 'cat' and 'dog' images.
 
 The confusion matrices and loss/accuracy plots for each model provide further insights into their performance and convergence during training. The analysis of misclassified images from the best performing model highlighted instances where the model struggled, often due to ambiguous or challenging visual features.
 
-Overall, the experiments demonstrated the effectiveness of CNNs, batch normalization, and data augmentation in improving the performance of image classification models on this dataset.
+Overall, the experiments demonstrated the effectiveness of CNNs, batch normalization, data augmentation, and especially transfer learning in improving the performance of image classification models on this dataset.
 """
