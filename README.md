@@ -46,7 +46,9 @@ Here's a summary of the performance on the test set for each model:
 | Larger CNN with Data Augmentation | 99% | 83% | ⚠️ Overfitting sign |
 | **Transfer Learning with EfficientNetB0** | **92%** | **91% 🏆** | 🌟 Best performance |
 ---
-> 🏁 **Conclusion:** The EfficientNetB0 model achieved the highest test accuracy, showing the benefit of transfer learning.
+> 🏁 **Conclusion:**
+> - The MLP model, implemented fully from scratch, shows strong training performance but lacks generalization due to absence of regularization and convolutional features.   
+> - The EfficientNetB0 model achieved the highest test accuracy, showing the benefit of transfer learning.
 
 ## ⚙️ Getting Started
 
