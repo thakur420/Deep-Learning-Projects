@@ -38,6 +38,7 @@ Here's a summary of the performance on the test set for each model:
 
 | 🧩 **Model** | ⚙️ **Train Accuracy** | 🧪 **Test Accuracy** | 📊 **Remarks** |
 |:-------------|:--------------------:|:--------------------:|:----------------|
+| **MLP Model (Implemented from Scratch)** | 85% | 60% | ⚠️ Overfitting — No convolution or augmentation used |
 | MLP Model | 98% | 61% | ⚠️ Overfitting |
 | Basic CNN Model | 93% | 73% | ✅ Stable baseline |
 | CNN with BN and Dropout (LeNet-5 style) | 80% | 75% | 👍 Better generalization |
